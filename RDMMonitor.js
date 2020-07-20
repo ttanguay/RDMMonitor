@@ -33,6 +33,7 @@ const IV_QUERY = '/api/get_data?show_ivqueue=true&formatted=true&instance=';
 const WEBSITE_AUTH = {'auth': {'user':config.websiteLogin, 'password':config.websitePassword}, 'jar':true};
 
 var postingDelay = config.postingDelay * 60000;
+var pollingDelay = config.pollingDelay * 60000;
 
 var devices = {};
 var instances = {};
@@ -44,7 +45,7 @@ var channelsCleared = false;
 
 Login();
 
-function Login(){    
+function Login(){
     let version = Discord.version;
     version = version.split('.');
     let primaryVersion = Number(version[0]);
@@ -76,90 +77,92 @@ bot.on('message', message => {
 });
 
 bot.on('ready', () => {
-    
+
     console.log(GetTimestamp()+"Discord bot logged in and ready");
 
     if(config.warningTime > 1000 || config.offlineTime > 1000)
     {
         console.log(GetTimestamp()+"WARNING warningTime and offlineTime should be in MINUTES not milliseconds");
-    }    
+    }
 
-    
+
     if(isNaN(postingDelay)) { postingDelay = 0; }
-    
-    
-   
-    StartupSequence();      
-      
+
+
+
+    StartupSequence();
+
     return;
-    
+
 });
 
 async function StartupSequence()
 {
+    if(isNaN(pollingDelay)) { pollingDelay = 5000; }
+
     await ClearAllChannels();
-    await UpdateStatusLoop();          
-    await PostStatus();      
+    await UpdateStatusLoop();
+    await PostStatus();
 
     return;
 }
 
 async function UpdateStatusLoop()
-{       
-    console.log(GetTimestamp()+"Beginning RDM query");    
+{
+    console.log(GetTimestamp()+"Beginning RDM query");
     await UpdateDevices();
     await UpdateInstances();
-    console.log(GetTimestamp()+"Finished RDM query");    
-    setTimeout(UpdateStatusLoop, 5000);
-    return;  
+    console.log(GetTimestamp()+"Finished RDM query");
+    setTimeout(UpdateStatusLoop, pollingDelay);
+    return;
 
 }
 
 function UpdateInstances()
-{    
+{
     return new Promise(function(resolve) {
         request.get(config.url+INSTANCE_QUERY, WEBSITE_AUTH, (err, res, body) => {
 
             if(err)
             {
                 console.error(GetTimestamp()+"Error querying RDM: "+err.code);
-                return resolve();                
+                return resolve();
             }
-        
+
             let data;
             try {
                 data = JSON.parse(body);
             } catch(err) {
                 console.error(GetTimestamp()+"Could not retrieve data from website: "+body);
                 console.error(GetTimestamp()+err);
-                return resolve();                
+                return resolve();
             }
 
             if(data.status=="error" || !data.data || !data)
             {
                 console.error(GetTimestamp()+"Could not retrieve data from website: "+data.error);
-                return resolve();                
+                return resolve();
             }
-            
+
             if(!data.data.instances)
             {
                 console.error(GetTimestamp()+"Failed to retrieve instance data from the website");
-                return resolve();                
+                return resolve();
             }
-            
+
             data.data.instances.forEach(async function(instance) {
                 if(!instances[instance.name])
                 {
                     await AddInstance(instance);
-                    
+
                 }
                 else
                 {
-                    await UpdateInstance(instance);                    
+                    await UpdateInstance(instance);
                 }
-            });    
-            return resolve();                     
-        });             
+            });
+            return resolve();
+        });
     });
 }
 
@@ -187,7 +190,7 @@ async function AddInstance(instance)
         }
         else
         {
-            if(!instance.status.quests) { console.log("Your RDM is out of date, please pull the latest from docker"); process.exit(0); return; }            
+            if(!instance.status.quests) { console.log("Your RDM is out of date, please pull the latest from docker"); process.exit(0); return; }
             let percent = instance.status.quests.current_count_db / instance.status.quests.total_count;
             percent *= 100;
             percent = PrecisionRound(percent, 2);
@@ -199,7 +202,7 @@ async function AddInstance(instance)
             }
         }
         break;
-        case "Circle Raid":      
+        case "Circle Raid":
         if(instance.status)
         {
             instances[instance.name] = {
@@ -216,7 +219,7 @@ async function AddInstance(instance)
                 'type':'raid'
             }
         }
-        break;  
+        break;
         case "Circle Pokemon":
         if(instance.status)
         {
@@ -239,9 +242,9 @@ async function AddInstance(instance)
         instances[instance.name] = {
             'name':instance.name,
             'status':instance.status.iv_per_hour+' IV/H',
-            'type':'iv',            
-            'queue': await GetIVQueue(instance.name)                     
-                    
+            'type':'iv',
+            'queue': await GetIVQueue(instance.name)
+
         }
         break;
         case "Circle Smart Raid":
@@ -249,7 +252,7 @@ async function AddInstance(instance)
             'name':instance.name,
             'status':instance.status.scans_per_h+' Scans/H',
             'type':'raid'
-        }        
+        }
         break;
         default:
         return;
@@ -268,7 +271,7 @@ async function UpdateInstance(instance)
         if(!instance.status) { return; }
         switch(instance.type)
         {
-            
+
             case "Auto Quest":
             if(instance.status.bootstrapping)
             {
@@ -277,7 +280,7 @@ async function UpdateInstance(instance)
                 percent = PrecisionRound(percent, 2);
 
                 instances[instance.name].status = 'Boostrapping: '+instance.status.bootstrapping.current_count+'/'+instance.status.bootstrapping.total_count+'('+percent+'%)';
-                
+
             }
             else
             {
@@ -286,7 +289,7 @@ async function UpdateInstance(instance)
                 percent = PrecisionRound(percent, 2);
 
                 instances[instance.name].status = instance.status.quests.current_count_db+'/'+instance.status.quests.total_count+'('+percent+'%)';
-                
+
             }
             break;
             case "Circle Raid":
@@ -294,20 +297,20 @@ async function UpdateInstance(instance)
             if(instance.status)
             {
                 instances[instance.name].status = 'Round Time: '+instance.status.round_time+'s';
-                
+
             }
             else
             {
                 instances[instance.name].status = 'Round Time: N/A';
-                
+
             }
             break;
             case "Pokemon IV":
-            instances[instance.name].status = instance.status.iv_per_hour+' IV/H';   
-            instances[instance.name].queue = await GetIVQueue(instance.name);                        
+            instances[instance.name].status = instance.status.iv_per_hour+' IV/H';
+            instances[instance.name].queue = await GetIVQueue(instance.name);
             break;
             case "Circle Smart Raid":
-            instances[instance.name].status = instance.status.scans_per_h+' Scans/H';            
+            instances[instance.name].status = instance.status.scans_per_h+' Scans/H';
             break;
 
         }
@@ -323,30 +326,30 @@ function UpdateDevices()
             if(err)
             {
                 console.error(GetTimestamp()+"Error querying RDM: "+err.code);
-                return resolve();                
+                return resolve();
             }
-                    
+
             let data;
             try {
                 data = JSON.parse(body);
             } catch(err) {
                 console.error(GetTimestamp()+"Could not retrieve data from website: "+body);
                 console.error(GetTimestamp()+err);
-                return resolve();                
-            }    
+                return resolve();
+            }
 
             if(data.status=="error" || !data.data)
             {
                 console.error(GetTimestamp()+"Could not retrieve data from website: "+data.error);
-                return resolve();                
+                return resolve();
             }
 
             if(!data.data.devices)
             {
                 console.error(GetTimestamp()+"Failed to retrieve device data from the website");
-                return resolve();                
+                return resolve();
             }
-            
+
             data.data.devices.forEach(async function(device) {
                 if(!devices[device.uuid])
                 {
@@ -356,18 +359,18 @@ function UpdateDevices()
                 {
                     await UpdateDevice(device);
                 }
-            });   
-            return resolve();   
+            });
+            return resolve();
         });
-             
-    });    
+
+    });
 }
 
 function AddDevice(device)
 {
     if(config.ignoredDevices.length > 0)
     {
-        if(config.ignoredDevices.indexOf(device.uuid) != -1) { return; } 
+        if(config.ignoredDevices.indexOf(device.uuid) != -1) { return; }
     }
 
     devices[device.uuid] = {
@@ -386,21 +389,21 @@ function AddDevice(device)
     if(!devices[device.uuid].host) {devices[device.uuid].host = "Unknown"}
 
     return UpdateDeviceState(devices[device.uuid]);
-    
+
 }
 
 function UpdateDevice(device)
 {
     if(!devices[device.uuid])
     {
-        return AddDevice(device);        
+        return AddDevice(device);
     }
     else
     {
         devices[device.uuid].lastSeen = device.last_seen;
         devices[device.uuid].account = device.username;
         devices[device.uuid].instance = device.instance;
-        devices[device.uuid].host = device.host;        
+        devices[device.uuid].host = device.host;
     }
 
     if(!devices[device.uuid].lastSeen) { devices[device.uuid].lastSeen = "Never"}
@@ -409,64 +412,64 @@ function UpdateDevice(device)
     if(!devices[device.uuid].host) {devices[device.uuid].host = "Unknown"}
 
     return UpdateDeviceState(devices[device.uuid]);
-    
+
 }
 
 async function PostStatus()
-{       
+{
     await PostDevices();
     await PostInstances();
     await PostGroupedDevices();
-    await SendOfflineDeviceDMs();   
-         
-    return;      
-    
+    await SendOfflineDeviceDMs();
+
+    return;
+
 }
 
 async function PostDevices()
-{             
+{
     if(!config.postIndividualDevices)
-    {            
-        return;            
+    {
+        return;
     }
     else
-    {    
-        console.log(GetTimestamp()+"Posting device status"); 
+    {
+        console.log(GetTimestamp()+"Posting device status");
         for(let deviceID in devices)
         {
             let device = devices[deviceID];
             if(device.message)
-            {                
+            {
                 await EditDevicePost(device);
                 await sleep(1000);
             }
             else
-            {                
+            {
                 await PostDevice(device);
                 await sleep(1000);
             }
         }
-        
-       
+
+
         console.log(GetTimestamp()+"Finished posting device status");
-        setTimeout(PostDevices,postingDelay);        
-        return;        
-    }    
-       
+        setTimeout(PostDevices,postingDelay);
+        return;
+    }
+
 }
 
 async function PostGroupedDevices()
 {
-    
-    return new Promise(async function(resolve) {          
+
+    return new Promise(async function(resolve) {
         if(config.postDeviceSummary)
-        {  
+        {
             console.log(GetTimestamp()+"Posting device summary");
             let now = new Date();
             now = now.getTime();
 
             let okDevices = [];
-            let warnDevices = []; 
+            let warnDevices = [];
             let offlineDevices = [];
 
             for(let deviceName in devices)
@@ -475,7 +478,7 @@ async function PostGroupedDevices()
                 let lastSeen = new Date(0);
                 lastSeen.setUTCSeconds(device.lastSeen);
                 lastSeen = lastSeen.getTime();
-                lastSeen = now - lastSeen;                
+                lastSeen = now - lastSeen;
                 if(lastSeen > offlineTime)
                 {
                     offlineDevices.push(device.name);
@@ -493,7 +496,7 @@ async function PostGroupedDevices()
             if(warnDevices.length == 0) {warnDevices.push("None")}
             if(offlineDevices.length == 0) {offlineDevices.push("None")}
 
-            
+
 
             PostDeviceGroup(okDevices, okColor, okImage, 'Working Devices', okDeviceMessage).then(posted => {
                 okDeviceMessage = posted.id;
@@ -501,20 +504,20 @@ async function PostGroupedDevices()
                     warnDeviceMessage = posted.id;
                     PostDeviceGroup(offlineDevices, offlineColor, offlineImage, 'Offline Devices', offlineDeviceMessage).then(posted => {
                         offlineDeviceMessage = posted.id;
-                        offlineDeviceList = offlineDevices;   
+                        offlineDeviceList = offlineDevices;
                         PostLastUpdated();
                         console.log(GetTimestamp()+"Finished posting device summary");
                         setTimeout(PostGroupedDevices, postingDelay);
-                        return resolve();                        
+                        return resolve();
                     });
                 });
-            });    
-            
+            });
+
         }
         else
-        {            
-            return resolve();           
-        }        
+        {
+            return resolve();
+        }
     });
 }
 
@@ -531,7 +534,7 @@ function SendOfflineDeviceDMs()
         let lastSeen = new Date(0);
         lastSeen.setUTCSeconds(device.lastSeen);
         lastSeen = lastSeen.getTime();
-        lastSeen = now - lastSeen;                
+        lastSeen = now - lastSeen;
         if(lastSeen > offlineTime)
         {
             offlineDevices.push(device.name);
@@ -558,11 +561,11 @@ function SendOfflineDeviceDMs()
 
     setTimeout(SendOfflineDeviceDMs,60000);
     return;
-    
+
 }
 
 async function SendDMAlert(device)
-{    
+{
     for(let i = 0; i < config.userAlerts.length; i++)
     {
         let user = await bot.users.fetch(config.userAlerts[i]);
@@ -582,7 +585,7 @@ async function SendDMAlert(device)
 }
 
 async function SendDeviceOnlineAlert(device)
-{    
+{
     for(let i = 0; i < config.userAlerts.length; i++)
     {
         let user = await bot.users.fetch(config.userAlerts[i]);
@@ -609,7 +612,7 @@ function PostDeviceGroup(deviceList, color, image, title, messageID)
         channel = await bot.channels.fetch(channel);
 
         let deviceString = GetDeviceString(deviceList);
-    
+
         let embed = new Discord.MessageEmbed();
 
         embed.setTitle(title);
@@ -623,7 +626,7 @@ function PostDeviceGroup(deviceList, color, image, title, messageID)
             if(!message)
             {
                 console.error(GetTimestamp()+"Missing device summary message");
-                return resolve();                    
+                return resolve();
             }
             message.edit({embed: embed}).then(posted => {
                 return resolve(posted);
@@ -635,19 +638,19 @@ function PostDeviceGroup(deviceList, color, image, title, messageID)
         }
         else
         {
-            channel.send({embed: embed}).then(posted => {            
-            return resolve(posted);            
+            channel.send({embed: embed}).then(posted => {
+            return resolve(posted);
             }).catch(err => {
                 console.error(GetTimestamp()+"Error sending a message: "+err);
                 return resolve();
             });
-        }        
+        }
     });
 }
 
 function GetDeviceString(deviceList)
 {
-    
+
     let currentString = "";
 
     for(let i = 0; i < deviceList.length; i++)
@@ -666,7 +669,7 @@ function GetDeviceString(deviceList)
         }
     }
 
-    
+
     return currentString;
 }
 
@@ -674,12 +677,12 @@ async function PostInstances()
 {
 
     if(!config.postInstanceStatus)
-    {            
-        return;            
+    {
+        return;
     }
     else
-    {        
-        console.log(GetTimestamp()+"Posting instance status"); 
+    {
+        console.log(GetTimestamp()+"Posting instance status");
         let posts = [];
         for(let instanceName in instances)
         {
@@ -697,17 +700,17 @@ async function PostInstances()
         }
 
             console.log(GetTimestamp()+"Finished posting instance status");
-            setTimeout(PostInstances,postingDelay);                
-            return;                               
-                
-    }        
-       
+            setTimeout(PostInstances,postingDelay);
+            return;
+
+    }
+
 }
 
 
 async function PostLastUpdated()
 {
-        
+
     let channel = config.deviceSummaryChannel ? config.deviceSummaryChannel : config.channel;
     channel = await bot.channels.fetch(channel);
     let now = new Date();
@@ -717,28 +720,28 @@ async function PostLastUpdated()
     {
         let message = await channel.messages.fetch(lastUpdatedMessage);
         if(!message)
-        {                    
-            return;                  
+        {
+            return;
         }
         message.edit(lastUpdated).then(edited => {
             lastUpdatedMessage = edited.id;
-            return;                    
+            return;
         }).catch(error => {
             console.log(GetTimestamp()+"Failed to edit a post: "+error);
             return;
-        });        
+        });
     }
     else
     {
         channel.send(lastUpdated).then(message => {
             lastUpdatedMessage = message.id;
-            return;              
+            return;
         }).catch(err => {
             console.error(GetTimestamp()+"Error sending a message: "+err);
             return;
         });
-    }             
-    
+    }
+
 }
 
 function PostInstance(instance)
@@ -746,11 +749,11 @@ function PostInstance(instance)
     return new Promise(async function(resolve) {
         let channel = config.instanceStatusChannel ? config.instanceStatusChannel : config.channel;
         channel = await bot.channels.fetch(channel);
-        let embed = BuildInstanceEmbed(instance);        
+        let embed = BuildInstanceEmbed(instance);
         let message = await channel.send({'embed': embed});
         instance.message = message.id;
         return resolve(true);
-                   
+
     });
 }
 
@@ -763,17 +766,17 @@ function EditInstancePost(instance)
         if(!message)
             {
                 console.error(GetTimestamp()+"Missing instance message");
-                return resolve();                    
+                return resolve();
             }
         let embed = BuildInstanceEmbed(instance);
         message.edit({'embed': embed}).then(edited => {
-            return resolve();                
+            return resolve();
         }).catch((error) => {
             console.error(GetTimestamp()+"Failed to edit an instance message: "+error);
             return resolve();
         });
-    });        
-    
+    });
+
 }
 
 function EditDevicePost(device)
@@ -785,28 +788,28 @@ function EditDevicePost(device)
         if(!message)
             {
                 console.error(GetTimestamp()+"Missing device message");
-                return resolve();                    
+                return resolve();
             }
         let embed = BuildDeviceEmbed(device);
         message.edit({'embed': embed}).then(edited => {
-            return resolve();                
+            return resolve();
         }).catch((error) => {
             console.error(GetTimestamp()+"Failed to edit a device post: "+error);
             return resolve();
         });
-             
+
     });
 }
 
 function PostDevice(device)
 {
-    return new Promise(async function(resolve){        
+    return new Promise(async function(resolve){
         let channel = config.deviceStatusChannel ? config.deviceStatusChannel : config.channel;
         channel = await bot.channels.fetch(channel);
         let message = BuildDeviceEmbed(device);
         let sent = await channel.send({embed:message});
         device.message = sent.id;
-        return resolve(); 
+        return resolve();
     });
 }
 
@@ -815,10 +818,10 @@ function BuildInstanceEmbed(instance)
     let embed = new Discord.MessageEmbed();
     let deviceList = GetDeviceList(instance);
 
-    let color = 0x0000FF;    
-    
+    let color = 0x0000FF;
+
     let now = new Date();
-    
+
     let image = instanceImage;
 
     switch(instance.type)
@@ -856,12 +859,12 @@ function BuildInstanceEmbed(instance)
     embed.addField('Status',instance.status,true);
     embed.addField('Device Count: ',deviceList.count,true);
     embed.addField('Deivce List: ',instanceDevices,true);
-   
+
 
     if(instance.type == 'iv' && instance.queue)
     {
         embed.addField('Queue', instance.queue, true);
-    }    
+    }
     embed.setTitle(instance.name);
     embed.setColor(color);
     embed.setThumbnail(image);
@@ -873,21 +876,21 @@ function BuildInstanceEmbed(instance)
 function BuildDeviceEmbed(device)
 {
     let embed = new Discord.MessageEmbed();
-    
+
 
     let color = okColor;
     let image = okImage;
-    
+
     let now = new Date();
     now = now.getTime();
 
     if(config.showLastSeen)
     {
-        
+
         let lastSeen = new Date(0);
         lastSeen.setUTCSeconds(device.lastSeen);
         embed.addField('Last Seen: ',lastSeen.toLocaleString(),true);
-          
+
         let lastSeenDifference = now - lastSeen.getTime();
         if(lastSeenDifference > warningTime)
         {
@@ -905,7 +908,7 @@ function BuildDeviceEmbed(device)
         embed.addField('Instance',device.instance,true);
     }
     if(config.showAccount)
-    { 
+    {
         embed.addField('Account',device.account,true);
     }
     if(config.showHost)
@@ -913,7 +916,7 @@ function BuildDeviceEmbed(device)
         embed.addField('Host',device.host,true);
     }
     if(config.showBuildCount)
-    {    
+    {
         embed.addField('Build Count',device.builds,true);
     }
     if(config.showOnlineTime)
@@ -926,21 +929,21 @@ function BuildDeviceEmbed(device)
 
         embed.addField('Current Uptime',currentUptime+'s',true);
         embed.addField('Last Build',device.lastBuild,true);
-    }   
+    }
 
-   
+
 
     embed.setColor(color);
     embed.setThumbnail(image);
     embed.setTitle(device.name);
-    embed.setFooter('Last Updated: '+new Date().toLocaleString());    
+    embed.setFooter('Last Updated: '+new Date().toLocaleString());
 
     return embed;
 }
 
 function ClearAllChannels()
 {
-    
+
     return new Promise(function(resolve) {
         if(!config.clearMessagesOnStartup || channelsCleared) { return resolve(); }
 
@@ -949,21 +952,21 @@ function ClearAllChannels()
         if(config.channel) { cleared.push(ClearMessages(config.channel)); console.log(GetTimestamp()+"Clearing channel ID: "+config.channel); }
         if(config.deviceStatusChannel) { cleared.push(ClearMessages(config.deviceStatusChannel)); console.log(GetTimestamp()+"Clearing channel ID: "+config.deviceStatusChannel); }
         if(config.instanceStatusChannel) { cleared.push(ClearMessages(config.instanceStatusChannel)); console.log(GetTimestamp()+"Clearing channel ID: "+config.instanceStatusChannel); }
-        if(config.deviceSummaryChannel) { cleared.push(ClearMessages(config.deviceSummaryChannel)); console.log(GetTimestamp()+"Clearing channel ID: "+config.deviceSummaryChannel); }     
+        if(config.deviceSummaryChannel) { cleared.push(ClearMessages(config.deviceSummaryChannel)); console.log(GetTimestamp()+"Clearing channel ID: "+config.deviceSummaryChannel); }
 
         Promise.all(cleared).then(done => {
             channelsCleared = true;
             console.log(GetTimestamp()+"All channels cleared");
-            return resolve();            
+            return resolve();
         });
 
     });
 }
 
 function ClearMessages(channelID)
-{    
+{
     return new Promise(async function(resolve) {
-    
+
         if(channelsCleared) { return resolve(); }
         let channel = await bot.channels.fetch(channelID);
         if(!channel) { console.error(GetTimestamp()+"Could not find a channel with ID: "+channelID); return resolve(); }
@@ -971,13 +974,13 @@ function ClearMessages(channelID)
         if(messages.size > 0)
         {
             await ClearMessages(channelID);
-                return resolve(true);  
+                return resolve(true);
         }
         else
         {
             console.log("Finished clearing channel ID: "+channelID);
-            return resolve(true);                    
-        }            
+            return resolve(true);
+        }
     });
 }
 
@@ -1002,11 +1005,11 @@ function UpdateDeviceState(device)
     lastSeen.setUTCSeconds(device.lastSeen);
     lastSeen = lastSeen.getTime();
     lastSeen = now - lastSeen;
-    
+
     let deviceState = "ok";
     if(lastSeen > rebuildTime) {deviceState = "warn"}
-    if(lastSeen > offlineTime) {deviceState = "offline"}    
-    
+    if(lastSeen > offlineTime) {deviceState = "offline"}
+
 
     if(!device.state)
     {
@@ -1027,7 +1030,7 @@ function UpdateDeviceState(device)
         return;
     }
     else
-    {        
+    {
         device.state = deviceState;
         switch(deviceState)
         {
@@ -1047,7 +1050,7 @@ function UpdateDeviceState(device)
     return;
 }
 
-function PrecisionRound(number, precision) 
+function PrecisionRound(number, precision)
 {
 	let factor = Math.pow(10, precision);
 	return Math.round(number * factor) / factor;
@@ -1064,13 +1067,13 @@ function RestartBot(type)
 {
     if(type == 'manual'){ process.exit(1); }
     else{
-        console.error(GetTimestamp()+"Unexpected error, bot stopping, likely websocket");  
+        console.error(GetTimestamp()+"Unexpected error, bot stopping, likely websocket");
         process.exit(1);
     }
     return;
 }
 
-bot.on('error', function(err)  {      
+bot.on('error', function(err)  {
     if(typeof err == 'object')
     {
         err = JSON.stringify(err);
@@ -1080,7 +1083,7 @@ bot.on('error', function(err)  {
     return;
 });
 
-process.on('uncaughtException', function(err) { 
+process.on('uncaughtException', function(err) {
     if(typeof err == 'object')
     {
         err = JSON.stringify(err);
@@ -1090,19 +1093,19 @@ process.on('uncaughtException', function(err) {
     return;
 });
 
-process.on('unhandledRejection', function(err) {  
+process.on('unhandledRejection', function(err) {
     if(typeof err == 'object')
     {
         err = JSON.stringify(err);
-    } 
+    }
     console.error(GetTimestamp()+'Uncaught exception: '+err);
     RestartBot();
     return;
 });
 
 bot.on('disconnect', function(closed) {
-    console.error(GetTimestamp()+'Disconnected from Discord'); 
-    return;   
+    console.error(GetTimestamp()+'Disconnected from Discord');
+    return;
 });
 
 function sleep(ms)
@@ -1120,24 +1123,24 @@ function GetIVQueue(instanceName)
         if(config.queueLimit == 0) { return resolve(''); }
 
         if(config.ignoredInstances.indexOf(instanceName) == -1) { return resolve(''); }
-        
+
         request.get(config.url+IV_QUERY+instanceName, WEBSITE_AUTH, (err, res, body) => {
 
-            
+
             let queue = '';
             if(err)
             {
                 console.error(GetTimestamp()+"Error querying RDM: "+err.code);
-                return resolve();                
+                return resolve();
             }
 
             let data = JSON.parse(body).data;
-            
+
 
             for(let i = 0; i < data.ivqueue.length; i++)
             {
                 queue += "Pokemon: **"+data.ivqueue[i].pokemon_name+"** Location: **"+data.ivqueue[i].location+"**\n";
-                if(i >= queueLimit - 1) { i = data.ivqueue.length; }                
+                if(i >= queueLimit - 1) { i = data.ivqueue.length; }
             }
 
             return resolve(queue);
